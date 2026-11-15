@@ -1,0 +1,40 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+.cache/
+.ruff_cache/
+.pytest_cache/
+.pyrefly_cache/
+.coverage
+htmlcov/
+
+# Local credentials and process configuration
+.env
+.env.*
+!.env.example
+cookies*.txt
+*.cookies
+
+# Runtime databases, sidecars and logs (including custom paths)
+*.sqlite
+*.sqlite3
+*.db
+*-wal
+*-shm
+*-journal
+*.log
+*.jsonl
+!*.example.jsonl
+
+# Downloaded audio, transcripts, embeddings, and models
+/data/
+
+# Local evaluation labels include excerpts from user transcripts
+/evaluation/*.jsonl

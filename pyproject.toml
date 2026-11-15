@@ -1,0 +1,43 @@
+[project]
+name = "yt-finder"
+version = "0.1.0"
+description = "Shared development and runtime environment for YT Finder"
+requires-python = ">=3.13"
+dependencies = [
+    "transcript-collector",
+    "video-search",
+    "yt-finder-cli",
+    "yt-finder-web",
+    "yt-finder-workflows",
+]
+
+[project.optional-dependencies]
+whisper = ["transcript-collector[whisper]"]
+gpu = ["transcript-collector[gpu]"]
+
+[dependency-groups]
+dev = ["ruff", "pyrefly", "types-yt-dlp", "httpx"]
+whisper = ["transcript-collector[whisper]"]
+gpu = ["transcript-collector[gpu]"]
+
+[tool.uv]
+package = false
+default-groups = ["dev", "whisper", "gpu"]
+
+[tool.uv.workspace]
+members = ["transcript_collector", "video_search", "apps/cli", "apps/web", "apps/workflows"]
+
+[tool.uv.sources]
+transcript-collector = { workspace = true }
+video-search = { workspace = true }
+yt-finder-cli = { workspace = true }
+yt-finder-web = { workspace = true }
+yt-finder-workflows = { workspace = true }
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I", "SIM"]
+
+[tool.pyrefly]
+project-includes = ["apps/*/src/**/*.py", "transcript_collector/src/**/*.py", "video_search/src/**/*.py", "tests/**/*.py"]
+search-path = ["apps/cli/src", "apps/web/src", "apps/workflows/src", "transcript_collector/src", "video_search/src"]
+check-unannotated-defs = true

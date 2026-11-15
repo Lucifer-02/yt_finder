@@ -1,0 +1,14 @@
+[project]
+name = "video-search"
+version = "0.1.0"
+description = "Hybrid search over stored timestamped video transcripts"
+requires-python = ">=3.13"
+dependencies = [
+    "sentence-transformers>=5,<6",
+    "transformers>=5.1,<6",
+    "numpy>=2,<3",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"

@@ -1,0 +1,17 @@
+[project]
+name = "transcript-collector"
+version = "0.1.0"
+description = "Prepare timestamped transcripts and store results in SQLite"
+requires-python = ">=3.13"
+dependencies = [
+    "yt-dlp[default]>=2026.10.26",
+    "deno>=2.3,<3",
+]
+
+[project.optional-dependencies]
+whisper = ["faster-whisper>=1.2,<2", "av>=11,<19"]
+gpu = ["nvidia-cublas-cu12>=12,<13", "nvidia-cudnn-cu12>=9,<10"]
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"

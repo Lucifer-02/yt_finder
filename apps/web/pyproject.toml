@@ -1,0 +1,16 @@
+[project]
+name = "yt-finder-web"
+version = "0.1.0"
+description = "Local web application for transcript collection and video search"
+requires-python = ">=3.13"
+dependencies = ["fastapi>=0.115,<1", "uvicorn>=0.34,<1"]
+
+[project.scripts]
+yt-web = "yt_web.server:main"
+
+[build-system]
+requires = ["uv_build>=0.13.6,<0.14.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "yt_web"
