@@ -5,6 +5,8 @@ ngữ nghĩa hoặc từ khóa. Có CLI và web local; hai thư viện collector
 
 ## Cài đặt
 
+**Hiện chỉ hỗ trợ chạy trên Linux; chưa hỗ trợ Windows native.**
+
 Cần Python 3.13+ và [uv](https://docs.astral.sh/uv/). Chạy từ root repo:
 
 ```bash
