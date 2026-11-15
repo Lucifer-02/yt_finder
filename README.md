@@ -4,6 +4,12 @@ Thu thập transcript YouTube vào SQLite rồi tìm video và các đoạn liê
 ngữ nghĩa hoặc từ khóa. Hai thư viện collector/search, CLI, web local và workflows
 cùng nằm trong `src/`, được đóng gói bởi một project `yt-finder` tại root.
 
+
+
+https://github.com/user-attachments/assets/173de190-6a85-4a1e-893d-cef2fb21271b
+
+
+
 ## Cài đặt
 
 **Hiện chỉ hỗ trợ chạy trên Linux; chưa hỗ trợ Windows native.**
