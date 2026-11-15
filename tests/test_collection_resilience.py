@@ -160,6 +160,100 @@ class CaptionTests(unittest.TestCase):
             with self.subTest(start=start), self.assertRaises(SourceError):
                 parse_json3(caption_data(start=start))
 
+    def test_channel_url_normalization_accepts_standard_youtube_tabs(self):
+        source = YouTube("en")
+        tabs = (
+            "videos",
+            "shorts",
+            "streams",
+            "featured",
+            "about",
+            "playlists",
+            "podcasts",
+            "community",
+            "live",
+            "membership",
+            "store",
+            "releases",
+            "channels",
+            "search",
+        )
+        with patch.object(
+            source, "_extract", return_value={"channel_id": "UCtest", "channel": "test"}
+        ) as extract:
+            for tab in tabs:
+                with self.subTest(tab=tab):
+                    res = source.resolve(f"https://www.youtube.com/@HubermanLab/{tab}")
+                    self.assertEqual(res.id, "UCtest")
+                    extract.assert_called_with(
+                        "https://www.youtube.com/@HubermanLab/videos", playlistend=1
+                    )
+            with self.assertRaises(SourceError):
+                source.resolve("https://www.youtube.com/@channel%2Fbad")
+
+    def test_json3_handles_null_timestamp_and_duration_safely(self):
+        data1 = {
+            "events": [
+                {"tStartMs": 1000, "dDurationMs": None, "segs": [{"utf8": "hello"}]}
+            ]
+        }
+        self.assertEqual(parse_json3(data1), [Segment("hello", 1.0, 0.0)])
+
+        data2 = {
+            "events": [
+                {"tStartMs": None, "dDurationMs": 2000, "segs": [{"utf8": "skip"}]},
+                {"tStartMs": 3000, "dDurationMs": 1500, "segs": [{"utf8": "keep"}]},
+            ]
+        }
+        self.assertEqual(parse_json3(data2), [Segment("keep", 3.0, 1.5)])
+
+        for bad_val in ("not_a_number", -1, float("nan")):
+            with self.subTest(bad_val=bad_val), self.assertRaises(SourceError):
+                parse_json3(
+                    {
+                        "events": [
+                            {
+                                "tStartMs": bad_val,
+                                "dDurationMs": 1000,
+                                "segs": [{"utf8": "err"}],
+                            }
+                        ]
+                    }
+                )
+
+    def test_transcript_candidate_loop_falls_back_on_track_errors(self):
+        source = YouTube("en")
+        source._video_info = (
+            "v",
+            {
+                "subtitles": {
+                    "en": [
+                        {"ext": "json3", "url": "https://example.org/bad_captions"},
+                        {"ext": "json3", "url": "https://example.org/good_captions"},
+                    ]
+                }
+            },
+        )
+        ydl = MagicMock()
+        ydl.__enter__.return_value = ydl
+        bad_json = json.dumps(
+            {
+                "events": [
+                    {
+                        "tStartMs": "bad",
+                        "dDurationMs": 1000,
+                        "segs": [{"utf8": "bad"}],
+                    }
+                ]
+            }
+        ).encode()
+        good_json = json.dumps(caption_data("recovered")).encode()
+        ydl.urlopen.side_effect = [io.BytesIO(bad_json), io.BytesIO(good_json)]
+        with patch.object(source, "_downloader", return_value=ydl):
+            segments = source.transcript("v")
+        self.assertEqual(len(segments), 1)
+        self.assertEqual(segments[0].text, "recovered")
+
 
 class CollectionFailureTests(unittest.TestCase):
     def setUp(self):

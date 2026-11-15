@@ -12,14 +12,14 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from fastapi.testclient import TestClient
+
+from tests.sqlite_fixture import SQLiteFixture
 from yt_web.catalog import Library
 from yt_web.config import WebConfig
 from yt_web.gateways import CollectorProcessGateway, SearchProcessGateway
 from yt_web.http import create_http_app
 from yt_web.jobs import JobManager, JobStore
 from yt_web.processes import ProcessWorker, WorkerCancelled, WorkerError
-
-from tests.sqlite_fixture import SQLiteFixture
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -325,6 +325,75 @@ class WebTests(unittest.TestCase):
                 ).status_code,
                 422,
             )
+
+    def test_where_http_options_omit_legacy_defaults_and_reject_explicit_scope_keys(
+        self,
+    ):
+        self.populate()
+        before = self.config.db.read_bytes()
+        headers = {"X-YT-Request": "1"}
+        where = "language='en' OR source_mode='custom-engine'"
+        with self.client() as client:
+            response = client.post(
+                "/api/search",
+                json={
+                    "query": "caption",
+                    "where": f"  {where}  ",
+                    "mode": "exact",
+                    "top": 2,
+                    "moments_per_video": 1,
+                    "offline": True,
+                },
+                headers=headers,
+            )
+            self.assertEqual(response.status_code, 200, response.text)
+            self.assertEqual(response.json()["where"], where)
+            options = self.search.calls[-1][1]
+            self.assertEqual(options["where"], where)
+            self.assertEqual(options["mode"], "exact")
+            self.assertEqual(options["top"], 2)
+            self.assertEqual(options["moments_per_video"], 1)
+            for key in (
+                "language",
+                "transcript_source",
+                "channel",
+                "source_mode",
+                "video_ids",
+            ):
+                self.assertNotIn(key, options)
+            for key, value in (
+                ("language", "vi"),
+                ("transcript_source", "auto"),
+                ("channel", None),
+                ("source_mode", None),
+                ("video_ids", None),
+            ):
+                with self.subTest(key=key):
+                    rejected = client.post(
+                        "/api/search",
+                        json={"query": "caption", "where": where, key: value},
+                        headers=headers,
+                    )
+                    self.assertEqual(rejected.status_code, 422, rejected.text)
+            self.assertEqual(len(self.search.calls), 1)
+            for invalid in ("", "   ", 123, ["language='en'"]):
+                with self.subTest(where=invalid):
+                    rejected = client.post(
+                        "/api/search",
+                        json={"query": "caption", "where": invalid},
+                        headers=headers,
+                    )
+                    self.assertEqual(rejected.status_code, 422, rejected.text)
+            self.assertEqual(len(self.search.calls), 1)
+            legacy = client.post(
+                "/api/search",
+                json={"query": "caption", "where": None, "language": "vi"},
+                headers=headers,
+            )
+            self.assertEqual(legacy.status_code, 200, legacy.text)
+            self.assertNotIn("where", self.search.calls[-1][1])
+            self.assertEqual(self.search.calls[-1][1]["language"], "vi")
+        self.assertEqual(self.config.db.read_bytes(), before)
 
     def test_invalid_requests_cross_origin_posts_and_hosts_are_rejected(self):
         with self.client() as client:

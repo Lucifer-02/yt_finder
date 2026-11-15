@@ -12,7 +12,7 @@ from unittest.mock import Mock, patch
 
 from yt_cli import launcher
 from yt_web import create_app
-from yt_web.config import WebConfig
+from yt_web.config import WebConfig, find_repository
 from yt_web.processes import ProcessWorker, WorkerError
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,7 +56,7 @@ class CLIApplicationTests(unittest.TestCase):
                 self.assertNotIn("cwd", run.call_args.kwargs)
                 self.assertEqual(
                     run.call_args.kwargs["env"]["PYTHONPATH"].split(os.pathsep)[0],
-                    str(root / "apps/cli/src"),
+                    str(root / "src"),
                 )
             self.assertEqual(dict(os.environ), before)
             self.assertNotIn("benchmark", launcher.COMMANDS)
@@ -150,8 +150,50 @@ class CLIApplicationTests(unittest.TestCase):
         self.assertEqual(exc.exception.code, 130)
 
 
+class RepositoryDiscoveryTests(unittest.TestCase):
+    def test_discovers_the_single_project_from_source_locations(self):
+        for discover in (launcher.repository_root, find_repository):
+            with (
+                self.subTest(discover=discover.__module__),
+                patch.dict(os.environ, {"YT_FINDER_ROOT": ""}),
+            ):
+                self.assertEqual(discover(), ROOT)
+
+    def test_configured_repository_needs_only_the_root_project_and_library_packages(
+        self,
+    ):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            (root / "pyproject.toml").touch()
+            for name in ("transcript_collector", "video_search"):
+                package = root / "src" / name
+                package.mkdir(parents=True)
+                (package / "__init__.py").touch()
+            for discover in (launcher.repository_root, find_repository):
+                with (
+                    self.subTest(discover=discover.__module__),
+                    patch.dict(os.environ, {"YT_FINDER_ROOT": str(root)}),
+                ):
+                    self.assertEqual(discover(), root)
+
+    def test_invalid_configured_repository_is_rejected_without_falling_back(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "pyproject.toml").touch()
+            for discover, error in (
+                (launcher.repository_root, RuntimeError),
+                (find_repository, ValueError),
+            ):
+                with (
+                    self.subTest(discover=discover.__module__),
+                    patch.dict(os.environ, {"YT_FINDER_ROOT": str(root)}),
+                    self.assertRaisesRegex(error, "YT_FINDER_ROOT"),
+                ):
+                    discover()
+
+
 class SharedInterpreterTests(unittest.TestCase):
-    def test_web_components_resolve_the_same_root_environment_on_each_platform(self):
+    def test_web_workers_use_the_root_environment_on_each_platform(self):
         root = Path("/repository")
         config = WebConfig(
             root, root / "input.sqlite3", root / "search.sqlite3", root / "web.sqlite3"
@@ -164,10 +206,7 @@ class SharedInterpreterTests(unittest.TestCase):
                 self.subTest(platform=platform),
                 patch("yt_web.config.os.name", platform),
             ):
-                for component in ("transcript_collector", "video_search"):
-                    self.assertEqual(
-                        config.interpreter(component), root / ".venv" / relative
-                    )
+                self.assertEqual(config.interpreter(), root / ".venv" / relative)
 
     def test_cli_uses_the_root_windows_interpreter(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -204,6 +243,28 @@ class SharedInterpreterTests(unittest.TestCase):
                 worker._start()
             process.assert_not_called()
 
+    def test_worker_uses_shared_sources_and_preserves_existing_pythonpath(self):
+        config = WebConfig(
+            ROOT,
+            ROOT / "input.sqlite3",
+            ROOT / "search.sqlite3",
+            ROOT / "web.sqlite3",
+        )
+        worker = ProcessWorker(config, "video_search", "yt_web.workers.search")
+        process = Mock(pid=123)
+        with (
+            patch.dict(os.environ, {"PYTHONPATH": "/existing/sources"}),
+            patch("yt_web.config.Path.is_file", return_value=True),
+            patch("yt_web.processes.subprocess.Popen", return_value=process) as spawn,
+        ):
+            before = dict(os.environ)
+            self.assertIs(worker._start(), process)
+            self.assertEqual(dict(os.environ), before)
+        self.assertEqual(
+            spawn.call_args.kwargs["env"]["PYTHONPATH"],
+            os.pathsep.join([str(ROOT / "src"), "/existing/sources"]),
+        )
+
 
 class WebApplicationTests(unittest.TestCase):
     def test_factory_is_side_effect_free_and_delegates_to_injected_gateways(self):
@@ -239,7 +300,9 @@ class WebApplicationTests(unittest.TestCase):
 class DependencyBoundaryTests(unittest.TestCase):
     def test_business_libraries_have_no_application_service_modules(self):
         for name in ("transcript_collector", "video_search"):
-            self.assertFalse((ROOT / name / "src" / name / "service.py").exists())
+            package = ROOT / "src" / name
+            self.assertTrue((package / "__init__.py").is_file())
+            self.assertFalse((package / "service.py").exists())
 
     def test_component_sources_never_import_applications_or_each_other(self):
         for name, forbidden in (
@@ -252,7 +315,9 @@ class DependencyBoundaryTests(unittest.TestCase):
                 {"yt_cli", "yt_web", "yt_workflows", "transcript_collector"},
             ),
         ):
-            for path in (ROOT / name / "src").rglob("*.py"):
+            paths = list((ROOT / "src" / name).rglob("*.py"))
+            self.assertTrue(paths, name)
+            for path in paths:
                 for node in ast.walk(ast.parse(path.read_text())):
                     modules = []
                     if isinstance(node, ast.Import):
@@ -271,20 +336,18 @@ class DependencyBoundaryTests(unittest.TestCase):
         # not import those modules or either model library.
         paths = [
             path
-            for path in (ROOT / "apps/web/src").rglob("*.py")
+            for path in (ROOT / "src/yt_web").rglob("*.py")
             if "workers" not in path.parts
         ]
-        paths += [
-            ROOT / "apps/cli/src/yt_cli/launcher.py",
-            ROOT / "apps/cli/src/yt_cli/__init__.py",
-        ]
+        self.assertTrue(paths)
+        paths += [ROOT / "src/yt_cli/launcher.py", ROOT / "src/yt_cli/__init__.py"]
         for path in paths:
             for node in ast.walk(ast.parse(path.read_text())):
                 if isinstance(node, ast.ImportFrom) and node.module:
                     self.assertNotIn(
                         node.module.split(".")[0],
                         {"transcript_collector", "video_search", "yt_cli"}
-                        if "apps/web" in str(path)
+                        if "yt_web" in path.parts
                         else {"transcript_collector", "video_search"},
                         str(path),
                     )

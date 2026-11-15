@@ -10,11 +10,14 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import numpy as np
+
+from tests.fakes import FakeTokenizer, fake_model, fake_reranker
+from tests.sqlite_fixture import SQLiteFixture
 from video_search.cache import EmbeddingStore, tokens
 from video_search.corpus import Corpus, Window
 from video_search.filtering import VideoFilter
 from video_search.models import DEFAULT_RERANKER, RetrievalModel, split_texts
-from video_search.search import SearchEngine, exact_scores
+from video_search.search import SearchEngine, exact_scores, lexical_scores
 from yt_cli.search import main as search_main
 from yt_workflows.evaluation import (
     FixedCorpus,
@@ -23,9 +26,6 @@ from yt_workflows.evaluation import (
     validate_evidence,
     validate_output_paths,
 )
-
-from tests.fakes import FakeTokenizer, fake_model, fake_reranker
-from tests.sqlite_fixture import SQLiteFixture
 
 
 def window(text, video="v", start=0, title="") -> Window:
@@ -571,6 +571,56 @@ class SearchTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, missing):
                     Corpus(str(path))
                 self.assertEqual(hashlib.sha256(path.read_bytes()).digest(), before)
+
+    def test_duplicate_passages_in_lexical_scoring_do_not_cause_integrity_error(self):
+        doc = window("hố đen vũ trụ", "v1")
+        scores = lexical_scores("hố đen", [doc, doc])
+        self.assertEqual(len(scores), 2)
+        self.assertEqual(scores[0], scores[1])
+        self.assertGreater(scores[0], 0)
+
+        cache_scores = self.cache.lexical_scores("hố đen", [doc, doc])
+        self.assertEqual(len(cache_scores), 2)
+        self.assertEqual(cache_scores[0], cache_scores[1])
+        self.assertGreater(cache_scores[0], 0)
+
+    def test_reranker_preserves_candidates_and_avoids_moment_starvation(self):
+        docs = [
+            window("keyword query moment 1", "v1", start=0),
+            window("keyword query moment 2", "v1", start=10),
+            window("keyword query moment 3", "v1", start=20),
+            window("keyword query moment 4", "v1", start=120),
+            window("keyword query moment 5", "v1", start=180),
+        ]
+        with patch.dict("sys.modules", {"sentence_transformers": self.module}):
+            engine = SearchEngine(self.cache, mode="hybrid", reranker_name="dummy")
+            results = engine.search_windows(
+                "query", docs, top=1, rerank_top=3, moments_per_video=3
+            )
+            self.assertEqual(len(results), 1)
+            moments = results[0].get("moments", [])
+            self.assertEqual(len(moments), 3)
+            for idx, m1 in enumerate(moments):
+                for m2 in moments[idx + 1:]:
+                    self.assertTrue(
+                        max(m1["start"], m2["start"]) >= min(m1["end"], m2["end"]),
+                        f"Moments overlap: {m1} and {m2}",
+                    )
+
+    def test_prepare_windows_cache_signature_invalidates_on_mode_change(self):
+        docs = [window("vũ trụ bao la", "v1")]
+        with patch.dict("sys.modules", {"sentence_transformers": self.module}):
+            engine = SearchEngine(self.cache, mode="keyword")
+            engine.prepare_windows(docs)
+            self.assertIsNone(engine.model)
+
+            engine.mode = "semantic"
+            engine.prepare_windows(docs)
+            self.assertIsNotNone(engine.model)
+            self.assertGreater(engine.matrix.shape[0], 0)
+
+            results = engine.search_windows("vũ trụ", docs)
+            self.assertEqual(len(results), 1)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import contextlib
 import io
 import json
 import logging
+import os
 import sqlite3
 import sys
 import tempfile
@@ -14,13 +15,13 @@ from pathlib import Path
 from unittest.mock import patch
 
 from fastapi.testclient import TestClient
+
+from tests.sqlite_fixture import SQLiteFixture
+from tests.test_web import FakeCollector, FakeSearch
 from yt_web.config import WebConfig
 from yt_web.http import create_http_app
 from yt_web.logs import LogStore, log_context
 from yt_web.processes import ProcessWorker, WorkerError
-
-from tests.sqlite_fixture import SQLiteFixture
-from tests.test_web import FakeCollector, FakeSearch
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -123,6 +124,19 @@ class WebLoggingTests(unittest.TestCase):
         self.addCleanup(store.close)
         with contextlib.closing(SQLiteFixture(self.config.db)):
             pass
+        # Exercise core logging before a deterministic source failure. An invalid
+        # channel is rejected before core logs, while orchestration logs belong
+        # to the application adapter. Keep the real collector protocol and core;
+        # replace only its external downloader boundary inside the child process.
+        fixture = self.root / "collector_logging_fixture.py"
+        fixture.write_text(
+            "from unittest.mock import patch\n"
+            "from yt_web.workers.collector import main\n"
+            "with patch('transcript_collector.youtube.YouTube._downloader', "
+            "side_effect=RuntimeError('offline fixture')):\n"
+            "    main()\n",
+            encoding="utf-8",
+        )
         events = []
         with (
             log_context(
@@ -133,20 +147,26 @@ class WebLoggingTests(unittest.TestCase):
             patch.object(WebConfig, "interpreter", return_value=Path(sys.executable)),
         ):
             collector = ProcessWorker(
-                self.config, "transcript_collector", "yt_web.workers.collector"
+                self.config,
+                "transcript_collector",
+                "collector_logging_fixture",
+                extra_env={
+                    "PYTHONPATH": os.pathsep.join([str(self.root), str(ROOT / "src")])
+                },
             )
             try:
-                with self.assertRaises(WorkerError):
+                with self.assertRaises(WorkerError) as error:
                     collector.call(
                         "collect",
                         {
-                            "target": "not-a-channel",
+                            "target": "https://www.youtube.com/watch?v=abcdefghijk",
                             "mode": "direct",
                             "language": "vi",
                             "db": str(self.config.db),
                         },
                         on_event=events.append,
                     )
+                self.assertEqual(error.exception.kind, "SourceError")
             finally:
                 collector.close()
             self.assertTrue(events)
@@ -169,6 +189,12 @@ class WebLoggingTests(unittest.TestCase):
         rows = store.read(level="DEBUG")["items"]
         self.assertTrue(
             any(row["logger"].startswith("transcript_collector") for row in rows)
+        )
+        self.assertTrue(
+            any(
+                row["logger"].startswith("yt_web.workers.collector_runtime")
+                for row in rows
+            )
         )
         self.assertTrue(any(row["logger"].startswith("video_search") for row in rows))
         self.assertTrue(

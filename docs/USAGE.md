@@ -3,8 +3,10 @@
 Chạy các lệnh từ root repo sau `uv sync --all-extras`. Mọi thành phần dùng chung
 một `.venv` và `uv.lock` tại root.
 
-Các nhóm mặc định `dev/whisper/gpu` giữ công cụ phát triển và extra collector khi
-dùng `uv run --locked`; không tạo môi trường/lock ở từng project. Collector giữ
+Hai thư viện collector/search cùng CLI/web/workflows nằm trong `src/`, dùng chung
+cấu hình đóng gói và dependency tại `pyproject.toml` root. Các nhóm mặc định
+`dev/whisper/gpu` giữ công cụ phát triển và dependency Whisper/GPU khi dùng
+`uv run --locked`; không tạo môi trường/lock riêng cho từng package. Collector giữ
 `av<19` để tương thích faster-whisper. Model/audio có thể lớn; chọn ổ đĩa đủ chỗ
 và không đặt cache model trên tmpfs nhỏ.
 
@@ -40,6 +42,7 @@ Quy tắc nguồn, retry, transaction và schema: [ARCHITECTURE.md](../ARCHITECT
 uv run --locked yt search "vai trò của insulin" --top 5 --moments-per-video 3
 uv run --locked yt search '"kháng insulin"' --mode keyword --json
 uv run --locked yt search "insulin" --video-id VIDEO_ID_1 --video-id VIDEO_ID_2
+uv run --locked yt search "insulin" --mode keyword --where "channel IN ('Kênh sức khỏe', 'Kênh khoa học') AND language IN ('vi', 'en')"
 uv run --locked yt search --interactive --offline
 ```
 
@@ -56,7 +59,15 @@ uv run --locked yt search --interactive --offline
 | `--source-mode`                 | Lọc loại phụ đề hoặc tên engine; `--transcript-source youtube\|generate` lọc nguồn |
 | `--channel`                     | ID kênh, tên chính xác hoặc URL canonical đã có trong DB                           |
 | `--video-id`                    | Lặp lại để chọn nhiều ID; kết hợp với các bộ lọc khác                              |
+| `--where "..."`                | Thay toàn bộ bộ lọc video/transcript bằng biểu thức WHERE; không ngầm lọc vi/Whisper |
 | `--top` / `--moments-per-video` | Số video / số đoạn không chồng lấn mỗi video; mặc định 5 / 3                       |
+
+`--where` không dùng cùng `--channel`, `--language`, `--transcript-source`,
+`--source-mode` hoặc `--video-id`, kể cả ghi rõ giá trị mặc định `vi`/`auto`.
+Biểu thức không có tiền tố `WHERE`; ví dụ `source = 'generate'` xét mọi engine
+generate hợp lệ. `channel` trong biểu thức là tên hiển thị; `channel_id` và
+`channel_url` lọc theo ID/URL. `--top`, model và chế độ tìm kiếm vẫn áp dụng.
+JSON và `/settings` phản ánh WHERE đang dùng.
 
 Các đoạn xếp theo độ liên quan, mỗi đoạn có timestamp và trích dẫn riêng; khi
 chồng lấn giữ cửa sổ điểm cao hơn, không gộp. Link mở đầu cửa sổ khoảng 60 giây,
@@ -75,6 +86,37 @@ các đoạn của video N, `/show N M` xem đoạn M, `/results` xem lại, `/t
 `/moments N` đổi giới hạn lượt sau, `/settings`, `/help`, `/quit`; dòng trống/EOF
 thoát. `--interactive --json` xuất một JSON mỗi dòng, không xử lý lệnh terminal.
 
+### Lọc nâng cao qua thư viện Python
+
+Core cung cấp `VideoFilter.select_where(where, params=())` để lọc metadata video,
+kênh và transcript trước khi chọn một transcript cho mỗi video:
+
+```python
+from contextlib import closing
+from video_search.corpus import Corpus
+from video_search.filtering import VideoFilter
+
+with closing(Corpus("data/index.sqlite3")) as corpus:
+    videos = VideoFilter(corpus).select_where(
+        "channel IN (?, ?) AND language IN ('vi', 'en') AND source = 'youtube'",
+        ("Kênh sức khỏe", "Kênh khoa học"),
+    )
+```
+
+`channel` là tên hiển thị kênh; dùng `channel_id` hoặc `channel_url` khi lọc theo
+ID/URL. Kết quả là snapshot video bất biến kèm đầy đủ segment, dùng được với
+`SearchEngine.search(query, videos)`. API này không ngầm lọc tiếng Việt hoặc chỉ
+Whisper; `select(VideoFilters())` vẫn mặc định vi/auto.
+
+Biểu thức không có tiền tố `WHERE`; dùng `?` và tuple `params` cho giá trị động.
+Các trường, toán tử được hỗ trợ và giới hạn nằm trong
+[hợp đồng lọc WHERE](../ARCHITECTURE.md#lọc-bằng-biểu-thức-where-trong-core).
+CLI/web dùng cùng cú pháp với giá trị literal; không nhận `params` hoặc placeholder
+`?`. Web có bộ chọn điều kiện no-code: chọn thuộc tính/phép so sánh/giá trị,
+ghép nhóm tất cả hoặc bất kỳ và loại trừ nhóm. Điều kiện tiếng Việt (gồm biến thể)
+mặc định hiển thị và xóa được; xóa hết để chọn mọi ngôn ngữ/nguồn. API web vẫn nhận
+trường `where` cho client lập trình.
+
 ## Web local
 
 ```bash
@@ -82,8 +124,8 @@ uv run --locked yt-web
 ```
 
 Web local tại http://127.0.0.1:8000 có collect/search/thư viện, tham số nâng cao,
-queue, tải JSON và nhật ký. Xem [hướng dẫn web](../apps/web/README.md).
-Quy trình đánh giá offline nằm ở `apps/workflows`; cách chạy và giới hạn:
+queue, tải JSON và nhật ký. Xem [hướng dẫn web](WEB.md).
+Quy trình đánh giá offline nằm ở [`src/yt_workflows`](WORKFLOWS.md); cách chạy và giới hạn:
 [evaluation](../evaluation/README.md).
 
 ## Dữ liệu, log và kiểm tra
@@ -105,13 +147,25 @@ DEBUG xoay ở 5 MiB + 3 backups; không log query/transcript/credential đầy 
 Sau `uv sync --all-extras`, kiểm tra từ cùng môi trường root:
 
 ```bash
-uv run --locked ruff check apps transcript_collector/src video_search/src tests
-uv run --locked ruff format --check apps transcript_collector/src video_search/src tests
+uv run --locked ruff check src tests
+uv run --locked ruff format --check src tests
 uv run --locked pyrefly check --python-interpreter-path .venv/bin/python --min-severity=warn
 uv run --locked python -m unittest tests.test_applications tests.test_core tests.test_filtering tests.test_moments tests.test_search tests.test_services tests.test_corpus_v2 tests.test_workflows tests.test_interactive tests.test_cli_logging tests.test_search_logging tests.test_collector tests.test_collector_logging tests.test_collector_migration tests.test_collection_resilience tests.test_video_collection tests.test_playlist_collection -q
 ```
 
-Đây là nhóm core/CLI/workflows; theo yêu cầu hiện tại chưa chạy test web app.
-Test giả không chứng minh kết nối YouTube, chất lượng transcript hoặc toàn kho.
+Lệnh unittest trên là nhóm core/CLI/workflows. Kiểm tra web và E2E bằng:
+
+```bash
+uv run --locked python -m unittest tests.test_web tests.test_web_parity tests.test_web_logging -q
+uv run --locked python -m unittest tests.test_cli_e2e tests.test_web_e2e -q
+```
+
+E2E chạy entrypoint CLI/server và search worker thật, dùng SQLite fixture riêng
+với keyword/exact; không gọi YouTube thật hoặc tải model. Collection E2E chỉ kiểm
+tra validation/lỗi, chưa kiểm chứng direct/generate thành công với YouTube.
+Kiểm tra giao diện bằng Chrome có thể chạy riêng; Chrome và công cụ điều khiển
+trình duyệt không là dependency của bộ test chuẩn.
+
+Test giả và E2E fixture không chứng minh kết nối YouTube, chất lượng transcript hoặc toàn kho.
 Không dùng tập con hay số đo cũ để khẳng định model tốt nhất. Quy trình planner/
 workers: [AGENTS.md](../AGENTS.md); chi tiết hợp đồng: [ARCHITECTURE.md](../ARCHITECTURE.md).

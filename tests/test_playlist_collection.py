@@ -243,6 +243,29 @@ class PlaylistCollectionTests(unittest.TestCase):
         self.assertTrue(all(not path.parent.exists() for path in audio_paths))
         self.source.transcript.assert_not_called()
 
+    def test_playlist_cached_videos_skip_resolve_and_emit_cached_events(self):
+        counts1 = self.collect()
+        self.assertEqual(counts1["indexed"], 3)
+        self.assertEqual(self.source.resolve_video.call_count, 3)
+
+        events = []
+        counts2 = self.collect(on_event=events.append)
+        self.assertEqual(counts2["cached"], 3)
+        self.assertEqual(counts2["indexed"], 0)
+        self.assertEqual(self.source.resolve_video.call_count, 3)
+
+        started_events = [e for e in events if e.kind == "video_started"]
+        finished_events = [e for e in events if e.kind == "video_finished"]
+        self.assertEqual(len(started_events), 3)
+        self.assertEqual(len(finished_events), 3)
+        for e in started_events:
+            self.assertTrue(e.cached)
+            self.assertIn(e.video_id, IDS)
+        for e in finished_events:
+            self.assertTrue(e.cached)
+            self.assertIn(e.video_id, IDS)
+            self.assertEqual(e.counts["cached"], 1)
+
     def test_cli_detects_playlist_and_uses_both_modes(self):
         engine = Mock(config="model", transcript_language="en")
         engine.name = "whisper"

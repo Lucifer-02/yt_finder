@@ -13,6 +13,8 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+from tests.fakes import fake_model, fake_reranker
+from tests.sqlite_fixture import SQLiteFixture
 from transcript_collector.config import CollectionRequest
 from transcript_collector.contracts import Channel, Segment, Video
 from transcript_collector.errors import SourceBlocked
@@ -22,9 +24,6 @@ from video_search.config import SearchConfig
 from video_search.models import DEFAULT_RERANKER
 from yt_cli.collector_runtime import collect
 from yt_cli.search_session import SearchSession
-
-from tests.fakes import fake_model, fake_reranker
-from tests.sqlite_fixture import SQLiteFixture
 
 
 class CollectionRuntimeTests(unittest.TestCase):
@@ -296,3 +295,33 @@ class SearchSessionTests(unittest.TestCase):
                 with self.subTest(query=query, top=top), self.assertRaises(ValueError):
                     session.search(query, top, minimum)
         self.loader.assert_not_called()
+
+    def test_where_config_rejects_invalid_predicates_and_scope_conflicts_before_resources(
+        self,
+    ):
+        for config in (
+            replace(self.config, where=""),
+            replace(self.config, where="language ="),
+            replace(self.config, where="missing = 1"),
+            replace(self.config, where="SELECT * FROM videos"),
+            replace(self.config, where="language='en'", language="en"),
+            replace(self.config, where="language='en'", transcript_source="youtube"),
+            replace(self.config, where="language='en'", channel="c"),
+            replace(self.config, where="language='en'", video_ids=()),
+            replace(self.config, where="language='en'", source_mode="manual"),
+        ):
+            with (
+                self.subTest(config=config),
+                patch("yt_cli.search_session.Corpus") as corpus,
+                patch("yt_cli.search_session.EmbeddingStore") as cache,
+                self.assertRaises(ValueError),
+            ):
+                SearchSession(config)
+            corpus.assert_not_called()
+            cache.assert_not_called()
+        self.loader.assert_not_called()
+        self.reranker_loader.assert_not_called()
+        with SearchSession(
+            replace(self.config, where="language='en'", mode="keyword")
+        ) as session:
+            self.assertEqual(session.search("initial"), [])

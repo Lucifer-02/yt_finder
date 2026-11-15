@@ -1,7 +1,8 @@
 # YouTube transcript finder
 
 Thu thập transcript YouTube vào SQLite rồi tìm video và các đoạn liên quan bằng
-ngữ nghĩa hoặc từ khóa. Có CLI và web local; hai thư viện collector/search độc lập.
+ngữ nghĩa hoặc từ khóa. Hai thư viện collector/search, CLI, web local và workflows
+cùng nằm trong `src/`, được đóng gói bởi một project `yt-finder` tại root.
 
 ## Cài đặt
 
@@ -13,7 +14,7 @@ Cần Python 3.13+ và [uv](https://docs.astral.sh/uv/). Chạy từ root repo:
 uv sync --all-extras
 ```
 
-Toàn workspace dùng chung một `.venv` và `uv.lock` tại root. yt-dlp dùng Deno/EJS;
+Toàn repo dùng chung một `.venv` và `uv.lock` tại root. yt-dlp dùng Deno/EJS;
 generate dùng Whisper. CUDA cần driver, CUDA 12/cuDNN phù hợp. Trọng số model có
 thể tải ở lần chạy đầu; cần ổ đĩa đủ chỗ.
 
@@ -35,6 +36,7 @@ model, nhãn đánh giá, cookie và `.env` cục bộ không được đưa lê
 
 - [Cách dùng, tùy chọn và lệnh kiểm tra](docs/USAGE.md)
 - [Kiến trúc, schema và hợp đồng dữ liệu](ARCHITECTURE.md)
-- [Web/API local](apps/web/README.md)
+- [CLI](docs/CLI.md)
+- [Web/API local](docs/WEB.md)
 - [Đánh giá tìm kiếm](evaluation/README.md)
 - [Hướng dẫn cho agent](AGENTS.md)

@@ -348,3 +348,35 @@ class SingleVideoTests(unittest.TestCase):
             self.assertRaises(SourceBlocked),
         ):
             YouTube("vi").videos(CHANNEL)
+
+    def test_invalid_video_id_and_inventory_failures_are_isolated_in_index_video(self):
+        source = Mock(transcript_mode="manual", transcript_language="vi")
+        with contextlib.closing(TranscriptStore(str(self.path))) as store:
+            store.save_channel(CHANNEL)
+
+            bad_video = Video("bad id with spaces", CHANNEL_ID, "Bad Video")
+            events = []
+            counts = index_video(
+                source, store, bad_video, "vi", mode="direct", on_event=events.append
+            )
+            self.assertEqual(counts["errors"], 1)
+            self.assertEqual(counts["indexed"], 0)
+            finished_events = [e for e in events if e.kind == "video_finished"]
+            self.assertEqual(len(finished_events), 1)
+            self.assertEqual(finished_events[0].video_id, "bad id with spaces")
+
+            missing_channel_video = Video("valid_id_123", "UCnonexistent", "Title")
+            events2 = []
+            counts2 = index_video(
+                source,
+                store,
+                missing_channel_video,
+                "vi",
+                mode="direct",
+                on_event=events2.append,
+            )
+            self.assertEqual(counts2["errors"], 1)
+            self.assertEqual(counts2["indexed"], 0)
+            finished_events2 = [e for e in events2 if e.kind == "video_finished"]
+            self.assertEqual(len(finished_events2), 1)
+            self.assertEqual(finished_events2[0].video_id, "valid_id_123")

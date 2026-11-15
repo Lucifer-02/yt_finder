@@ -1,20 +1,22 @@
 # Kiến trúc và hợp đồng
 
-## Workspace và ranh giới
+## Project và ranh giới
 
-Workspace có năm project Python, cài editable vào **một `.venv` tại root**; chỉ
-`uv.lock` ở root là nguồn khóa dependency. Root phụ thuộc cả năm member; các nhóm
-mặc định `dev`, `whisper`, `gpu` giữ bộ công cụ phát triển và extra collector khi
-chạy `uv run --locked`. `uv sync --all-extras` cài đầy đủ. `pyproject.toml` của các
-member vẫn mô tả package, không tạo môi trường hoặc lock riêng.
+Một project `yt-finder` tại root đóng gói hai thư viện `transcript_collector`,
+`video_search` và các package ứng dụng `yt_cli`, `yt_web`, `yt_workflows` trong
+`src/`. Một `pyproject.toml` tại root quản lý build, dependency, extra và các lệnh
+CLI/web; không còn project con hoặc uv workspace member. Project cài editable vào
+**một `.venv` tại root**; chỉ `uv.lock` ở root là nguồn khóa dependency.
+Các nhóm mặc định `dev`, `whisper`, `gpu` giữ bộ công cụ phát triển và dependency
+Whisper/GPU khi chạy `uv run --locked`. `uv sync --all-extras` cài đầy đủ.
 
 | Thành phần | Trách nhiệm |
 | --- | --- |
-| `transcript_collector/src/transcript_collector` | yt-dlp, engine, pipeline collect và SQLite transcript |
-| `video_search/src/video_search` | đọc corpus, lọc video, chia cửa sổ, mô hình/xếp hạng và search cache |
-| `apps/cli/src/yt_cli` | parser, terminal, interactive, launcher và adapter điều phối |
-| `apps/web/src/yt_web` | HTTP/UI local, queue/state, gateway và worker adapter |
-| `apps/workflows/src/yt_workflows` | đánh giá đồng bộ và helper ứng dụng |
+| `src/transcript_collector` | yt-dlp, engine, pipeline collect và SQLite transcript |
+| `src/video_search` | đọc corpus, lọc video, chia cửa sổ, mô hình/xếp hạng và search cache |
+| `src/yt_cli` | parser, terminal, interactive, launcher và adapter điều phối |
+| `src/yt_web` | HTTP/UI local, queue/state, gateway và worker adapter |
+| `src/yt_workflows` | đánh giá đồng bộ và helper ứng dụng |
 
 Hai core không import nhau hoặc ứng dụng; không có `service.py`, CLI, worker
 transport, `print/input/SystemExit`, hoặc tự thay `os.environ`. Collector không gọi
@@ -160,6 +162,66 @@ with closing(EmbeddingStore("data/search.sqlite3")) as cache:
 Bộ lọc phát hiện commit collector qua `PRAGMA data_version`; cùng snapshot được
 engine dùng lại. Tạo/gọi/đóng một session tuần tự trên cùng luồng sở hữu SQLite.
 
+### Lọc bằng biểu thức WHERE trong core
+
+`VideoFilter.select_where(where: str, params: tuple = ())` trả cùng kiểu
+`list[VideoTranscript]`, gồm metadata và toàn bộ segment của transcript đã chọn.
+Biểu thức áp dụng lên các ứng viên **trước** khi chọn một transcript có nội dung
+cho mỗi video; không cắt segment hoặc ghép nhiều transcript.
+
+```python
+with closing(Corpus("data/index.sqlite3")) as corpus:
+    videos = VideoFilter(corpus).select_where(
+        "channel IN (?, ?) AND language IN ('vi', 'en') AND source = 'youtube'",
+        ("Kênh sức khỏe", "Kênh khoa học"),
+    )
+```
+
+`select_where` xét các ngôn ngữ và engine generate hợp lệ trong schema v2, không tự
+thêm `language='vi'` hoặc chỉ giới hạn Whisper.
+Trong tập ứng viên thỏa điều kiện, ưu tiên YouTube manual → auto_generated →
+translated → unknown → generate; khi cùng mức ưu tiên, mã ngôn ngữ được sắp theo
+thứ tự từ điển. `select(VideoFilters())` vẫn giữ chính sách vi/auto ở trên.
+
+| Trường logic | Ý nghĩa |
+| --- | --- |
+| `video_id`, `title`, `description` | ID, tiêu đề và mô tả video |
+| `channel`, `channel_title` | Tên hiển thị của kênh; hai tên trường tương đương |
+| `channel_id`, `channel_url` | ID và URL canonical của kênh |
+| `language` | Mã ngôn ngữ transcript; `IN ('vi', 'en')` chỉ khớp đúng hai mã này |
+| `source`, `source_mode` | Nguồn `youtube\|generate` và loại phụ đề/tên engine |
+| `updated_at` | Thời gian cập nhật transcript UTC, không phải ngày đăng video |
+
+| Thành phần biểu thức | Cú pháp hỗ trợ |
+| --- | --- |
+| Kết hợp điều kiện | `AND`, `OR`, `NOT`, dấu ngoặc `(...)` |
+| So sánh | `=`, `!=`, `<>`, `<`, `<=`, `>`, `>=` |
+| Tập hợp, mẫu, khoảng | `IN`, `NOT IN`, `LIKE`/`NOT LIKE` (có thể thêm `ESCAPE`), `BETWEEN`, `NOT BETWEEN` |
+| Giá trị rỗng | `IS NULL`, `IS NOT NULL` |
+| Giá trị | Chuỗi trong nháy đơn, số, `NULL` hoặc placeholder `?` nhận giá trị từ `params` |
+
+Chỉ truyền phần biểu thức, không thêm từ khóa `WHERE`. Dùng `?` cho giá trị động;
+giá trị được bind khi truy vấn. Trường không xác định hoặc biểu thức sai gây
+`ValueError`. API không nhận tên bảng/cột segment, hàm SQL, subquery, `SELECT`,
+nhiều câu lệnh hoặc comment SQL.
+
+CLI nhận `--where "..."`; web API nhận trường `where` trong POST `/api/search`.
+Biểu thức thay toàn bộ bộ lọc video và
+transcript; không kết hợp với ngôn ngữ/nguồn mặc định. CLI/API từ chối khi gửi
+cùng kênh, ngôn ngữ, nguồn, mode transcript hoặc ID video riêng, kể cả giá trị
+`vi`/`auto` mặc định được ghi rõ. Model, chế độ xếp hạng, top và số đoạn vẫn áp dụng
+bình thường. CLI/web API nhận literal trong biểu thức; placeholder `?` và `params`
+chỉ dành cho API Python.
+
+Giao diện web là bộ dựng điều kiện no-code: chọn thuộc tính, phép so sánh và giá
+trị; ghép nhóm tất cả/bất kỳ, loại trừ hoặc lồng nhóm. UI không yêu cầu nhập SQL;
+nội bộ chuyển điều kiện sang `where`, không gửi kèm các filter riêng. Điều kiện
+mặc định “Ngôn ngữ thuộc vi, gồm biến thể” hiển thị và xóa được; xóa hết điều kiện
+chọn mọi ngôn ngữ/nguồn. Kênh được hiển thị bằng tên nhưng lọc theo ID. Phép “chứa”,
+“bắt đầu bằng”, “kết thúc bằng” tự xử lý ký tự `%`, `_` như dữ liệu thường; ngày
+cập nhật tính theo UTC và khoảng ngày bao gồm cả ngày đầu/cuối. Nhóm lồng rỗng hoặc
+điều kiện thiếu giá trị chặn gửi yêu cầu.
+
 ### Xếp hạng và nhiều đoạn
 
 Cửa sổ khoảng 60 giây, bước khoảng 30 giây, bám thời gian segment; `end` có thể dài
@@ -223,4 +285,4 @@ khóa liên tiến trình cho ghi/rotation. Protocol log tách progress; không 
 vào DB nghiệp vụ, không log toàn query/transcript/vector/cookie/token; thông báo
 credential/URL được che. Đường dẫn log và các bản xoay/khóa cũng được bảo vệ alias.
 
-Chi tiết UI/API: [apps/web/README.md](apps/web/README.md).
+Chi tiết UI/API: [docs/WEB.md](docs/WEB.md).

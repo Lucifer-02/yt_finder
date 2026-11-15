@@ -25,8 +25,6 @@ class MigrationTests(unittest.TestCase):
                     PRIMARY KEY(video_id,language,source));
                 CREATE TABLE transcript_parts(video_id TEXT,language TEXT,source TEXT,position INTEGER,start REAL,duration REAL,text TEXT,
                     PRIMARY KEY(video_id,language,source,position));
-                CREATE TABLE untouched(note TEXT);
-                INSERT INTO untouched VALUES('keep');
                 INSERT INTO channels VALUES('c','channel','url');
                 INSERT INTO videos VALUES('v','c','title','description');
                 INSERT INTO transcripts VALUES('v','vi','youtube','vi,en','timestamp');
@@ -79,9 +77,6 @@ class MigrationTests(unittest.TestCase):
                 store.cached("v", "generate", "medium", source_mode="other-engine")
             )
             self.assertEqual(
-                store.db.execute("SELECT note FROM untouched").fetchone()[0], "keep"
-            )
-            self.assertEqual(
                 store.db.execute("PRAGMA foreign_key_check").fetchall(), []
             )
         with contextlib.closing(TranscriptStore(str(self.path))) as store:
@@ -94,6 +89,23 @@ class MigrationTests(unittest.TestCase):
         before = self.path.read_bytes()
         with self.assertRaises(sqlite3.IntegrityError):
             TranscriptStore(str(self.path))
+        self.assertEqual(before, self.path.read_bytes())
+
+    def test_unknown_tables_rejected_without_migration(self):
+        self.v1()
+        with contextlib.closing(sqlite3.connect(self.path)) as db:
+            db.execute("CREATE TABLE untouched(note TEXT)")
+            db.execute("INSERT INTO untouched VALUES('keep')")
+            db.commit()
+        before = self.path.read_bytes()
+        with self.assertRaises(ValueError) as ctx:
+            TranscriptStore(str(self.path))
+        self.assertIn("Incompatible collector database", str(ctx.exception))
+        with contextlib.closing(sqlite3.connect(self.path)) as db:
+            self.assertEqual(db.execute("PRAGMA user_version").fetchone()[0], 1)
+            self.assertEqual(
+                db.execute("SELECT note FROM untouched").fetchone()[0], "keep"
+            )
         self.assertEqual(before, self.path.read_bytes())
 
     def test_engine_modes_and_subtitle_modes_have_independent_segments(self):

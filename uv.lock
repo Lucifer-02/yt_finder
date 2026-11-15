@@ -2,16 +2,6 @@ version = 1
 revision = 5
 requires-python = ">=3.13"
 
-[manifest]
-members = [
-    "transcript-collector",
-    "video-search",
-    "yt-finder",
-    "yt-finder-cli",
-    "yt-finder-web",
-    "yt-finder-workflows",
-]
-
 [[package]]
 name = "annotated-doc"
 version = "0.0.5"
@@ -1811,36 +1801,6 @@ wheels = [
 ]
 
 [[package]]
-name = "transcript-collector"
-version = "0.1.0"
-source = { editable = "transcript_collector" }
-dependencies = [
-    { name = "deno" },
-    { name = "yt-dlp", extra = ["default"] },
-]
-
-[package.optional-dependencies]
-gpu = [
-    { name = "nvidia-cublas-cu12" },
-    { name = "nvidia-cudnn-cu12" },
-]
-whisper = [
-    { name = "av" },
-    { name = "faster-whisper" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "av", marker = "extra == 'whisper'", specifier = ">=11,<19" },
-    { name = "deno", specifier = ">=2.3,<3" },
-    { name = "faster-whisper", marker = "extra == 'whisper'", specifier = ">=1.2,<2" },
-    { name = "nvidia-cublas-cu12", marker = "extra == 'gpu'", specifier = ">=12,<13" },
-    { name = "nvidia-cudnn-cu12", marker = "extra == 'gpu'", specifier = ">=9,<10" },
-    { name = "yt-dlp", extras = ["default"], specifier = ">=2026.10.26" },
-]
-provides-extras = ["whisper", "gpu"]
-
-[[package]]
 name = "transformers"
 version = "5.22.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1947,23 +1907,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/da/34/30e9280707135d2cfc589dfff3cb796bd07a3aeb1a3e415ba09dd89d7bb4/uvicorn-0.54.0.tar.gz", hash = "sha256:a2e33cbfaa0306f8e6b0c13e0cb89d7d7a2da3e62b90c66e18c33d9807b28620", size = 112283, upload-time = "2026-09-25T06:52:37.601Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/38/0c/b54a4fdd7f90a3af8b02ebc9ce6712c2c208b7926a2f7bad95c33ebbe943/uvicorn-0.54.0-py3-none-any.whl", hash = "sha256:505bdb0f318731d45f1f712071fc781a8981f6847a31c902c9f5e652d4f67faf", size = 87427, upload-time = "2026-09-25T06:52:35.829Z" },
-]
-
-[[package]]
-name = "video-search"
-version = "0.1.0"
-source = { editable = "video_search" }
-dependencies = [
-    { name = "numpy" },
-    { name = "sentence-transformers" },
-    { name = "transformers" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "numpy", specifier = ">=2,<3" },
-    { name = "sentence-transformers", specifier = ">=5,<6" },
-    { name = "transformers", specifier = ">=5.1,<6" },
 ]
 
 [[package]]
@@ -2109,22 +2052,26 @@ wheels = [
 [[package]]
 name = "yt-finder"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 default-groups = ["dev", "gpu", "whisper"]
 dependencies = [
-    { name = "transcript-collector" },
-    { name = "video-search" },
-    { name = "yt-finder-cli" },
-    { name = "yt-finder-web" },
-    { name = "yt-finder-workflows" },
+    { name = "deno" },
+    { name = "fastapi" },
+    { name = "numpy" },
+    { name = "sentence-transformers" },
+    { name = "transformers" },
+    { name = "uvicorn" },
+    { name = "yt-dlp", extra = ["default"] },
 ]
 
 [package.optional-dependencies]
 gpu = [
-    { name = "transcript-collector", extra = ["gpu"] },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cudnn-cu12" },
 ]
 whisper = [
-    { name = "transcript-collector", extra = ["whisper"] },
+    { name = "av" },
+    { name = "faster-whisper" },
 ]
 
 [package.dev-dependencies]
@@ -2135,21 +2082,27 @@ dev = [
     { name = "types-yt-dlp" },
 ]
 gpu = [
-    { name = "transcript-collector", extra = ["gpu"] },
+    { name = "nvidia-cublas-cu12" },
+    { name = "nvidia-cudnn-cu12" },
 ]
 whisper = [
-    { name = "transcript-collector", extra = ["whisper"] },
+    { name = "av" },
+    { name = "faster-whisper" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "transcript-collector", editable = "transcript_collector" },
-    { name = "transcript-collector", extras = ["gpu"], marker = "extra == 'gpu'", editable = "transcript_collector" },
-    { name = "transcript-collector", extras = ["whisper"], marker = "extra == 'whisper'", editable = "transcript_collector" },
-    { name = "video-search", editable = "video_search" },
-    { name = "yt-finder-cli", editable = "apps/cli" },
-    { name = "yt-finder-web", editable = "apps/web" },
-    { name = "yt-finder-workflows", editable = "apps/workflows" },
+    { name = "av", marker = "extra == 'whisper'", specifier = ">=11,<19" },
+    { name = "deno", specifier = ">=2.3,<3" },
+    { name = "fastapi", specifier = ">=0.115,<1" },
+    { name = "faster-whisper", marker = "extra == 'whisper'", specifier = ">=1.2,<2" },
+    { name = "numpy", specifier = ">=2,<3" },
+    { name = "nvidia-cublas-cu12", marker = "extra == 'gpu'", specifier = ">=12,<13" },
+    { name = "nvidia-cudnn-cu12", marker = "extra == 'gpu'", specifier = ">=9,<10" },
+    { name = "sentence-transformers", specifier = ">=5,<6" },
+    { name = "transformers", specifier = ">=5.1,<6" },
+    { name = "uvicorn", specifier = ">=0.34,<1" },
+    { name = "yt-dlp", extras = ["default"], specifier = ">=2026.10.26" },
 ]
 provides-extras = ["whisper", "gpu"]
 
@@ -2160,30 +2113,11 @@ dev = [
     { name = "ruff" },
     { name = "types-yt-dlp" },
 ]
-gpu = [{ name = "transcript-collector", extras = ["gpu"], editable = "transcript_collector" }]
-whisper = [{ name = "transcript-collector", extras = ["whisper"], editable = "transcript_collector" }]
-
-[[package]]
-name = "yt-finder-cli"
-version = "0.1.0"
-source = { editable = "apps/cli" }
-
-[[package]]
-name = "yt-finder-web"
-version = "0.1.0"
-source = { editable = "apps/web" }
-dependencies = [
-    { name = "fastapi" },
-    { name = "uvicorn" },
+gpu = [
+    { name = "nvidia-cublas-cu12", specifier = ">=12,<13" },
+    { name = "nvidia-cudnn-cu12", specifier = ">=9,<10" },
 ]
-
-[package.metadata]
-requires-dist = [
-    { name = "fastapi", specifier = ">=0.115,<1" },
-    { name = "uvicorn", specifier = ">=0.34,<1" },
+whisper = [
+    { name = "av", specifier = ">=11,<19" },
+    { name = "faster-whisper", specifier = ">=1.2,<2" },
 ]
-
-[[package]]
-name = "yt-finder-workflows"
-version = "0.1.0"
-source = { editable = "apps/workflows" }
